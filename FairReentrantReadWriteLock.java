@@ -15,6 +15,10 @@ import java.util.concurrent.locks.ReentrantLock;
  * These is a known bug of ReentrantReadWriteLock in Java 8 standard lib, see more in https://bugs.openjdk.java.net/browse/JDK-8051848
  *
  * Here we have to write our own version of ReentrantReadWriteLock and use this one before we move to Java 9 or higher.
+ * This supports:
+ * 1. Basic ReadWriteLock semantics.
+ * 2. FIFO - First In First Out, as the naming 'fair' indicates.
+ * 3. Reentrant semantics.
  *
  * @date 2019-02-18
  * @author Jerry Yang
@@ -29,8 +33,11 @@ public class FairReentrantReadWriteLock implements ReadWriteLock {
     private boolean writer = false;
     private int reader = 0;
 
-    /* owner is only valid for exclusive ownership.
-     * For multiple readers, owner is meaningless. */
+    /**
+     * Reader and writer share the same owner set.
+     * For exclusive (write) mode, owner size should be one.
+     * For share readers mode, there are more than one owners.
+     **/
     private Set<Long> owners = new HashSet<>();
     private ThreadLocal<Integer> readHoldCounter = ThreadLocal.withInitial(() -> 0);
     private ThreadLocal<Integer> writeHoldCounter = ThreadLocal.withInitial(() -> 0);
@@ -132,7 +139,10 @@ public class FairReentrantReadWriteLock implements ReadWriteLock {
                 if (readHoldCounter.get() == 0 && writeHoldCounter.get() == 0) {
                     owners.remove(me);
                 }
-                condition.signalAll();
+                if (readHoldCounter.get() == 0) {
+                    readHoldCounter.remove();
+                    condition.signalAll();
+                }
             } finally {
                 lock.unlock();
             }
@@ -290,13 +300,14 @@ public class FairReentrantReadWriteLock implements ReadWriteLock {
                     throw new IllegalMonitorStateException();
                 }
                 writeHoldCounter.set(writeHoldCounter.get() - 1);
-                if (writeHoldCounter.get() == 0) {
-                    writer = false;
-                }
                 if (readHoldCounter.get() == 0 && writeHoldCounter.get() == 0) {
                     owners.remove(me);
                 }
-                condition.signalAll();
+                if (writeHoldCounter.get() == 0) {
+                    writer = false;
+                    writeHoldCounter.remove();
+                    condition.signalAll();
+                }
             } finally {
                 lock.unlock();
             }
