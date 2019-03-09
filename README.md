@@ -13,5 +13,5 @@ My own implementation of ReentrantReadWriteLock
 File Notes:
  * ReentrantReadWriteLock.java : use ReentrantLock() lock.
  
- * ReentrantReadWriteLockII.java : use intrinsic object lock by synchronized. and fix to make sure lock() is noninterruptable, which is compliant with Java ReentrantReadWriteLock semantic.
- * Test cases are mimic from the standard ava concurrent test cases.
+ * ReentrantReadWriteLockII.java : use intrinsic object lock by synchronized. This is improved version with fixes to make sure lock() is noninterruptable, which is compliant with Java ReentrantReadWriteLock semantic.
+ * Test cases are mimic from the standard Java concurrent test cases.
