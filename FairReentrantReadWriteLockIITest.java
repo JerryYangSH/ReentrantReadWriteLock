@@ -286,6 +286,31 @@ public class FairReentrantReadWriteLockIITest {
     }
 
     @Test
+    public void testReadLock_Uninterruptible() throws InterruptedException {
+        final FairReentrantReadWriteLockII lock = new FairReentrantReadWriteLockII();
+        lock.writeLock().lock();
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                boolean gotException = false;
+                try {
+                    lock.readLock().lock();
+                    lock.readLock().unlock();
+                } catch (Exception e) {
+                    gotException = true;
+                }
+                assertFalse(gotException);
+            }});
+
+        startAndWaitForQueuedThread(lock, t);
+        t.interrupt();
+        Thread.sleep(MAX_TIMEOUT_MS);
+        hasQueuedThread(lock, t);
+        releaseWriteLock(lock);
+        awaitTermination(t);
+    }
+
+    @Test
     public void testReadLockInterruptibly_Interruptible() throws InterruptedException {
         final FairReentrantReadWriteLockII lock = new FairReentrantReadWriteLockII();
         lock.writeLock().lock();
@@ -767,11 +792,15 @@ public class FairReentrantReadWriteLockIITest {
         Thread t = new Thread(new Runnable() {
             @Override
             public void run() {
+                boolean gotException = false;
                 try {
                     long startTime = System.nanoTime();
                     assertFalse(lock.writeLock().tryLock(MAX_TIMEOUT_MS, TimeUnit.MILLISECONDS));
-                    assertTrue((System.nanoTime() - startTime) >= MAX_TIMEOUT_MS);
-                } catch (InterruptedException ie) {}
+                    assertTrue((System.nanoTime() - startTime) >= TimeUnit.MILLISECONDS.toNanos(MAX_TIMEOUT_MS));
+                } catch (InterruptedException ie) {
+                    gotException = true;
+                }
+                assertFalse(gotException);
             }});
         startThread(t);
         awaitTermination(t);
@@ -785,11 +814,15 @@ public class FairReentrantReadWriteLockIITest {
         Thread t = new Thread(new Runnable() {
             @Override
             public void run() {
+                boolean gotException = false;
                 try {
                     long startTime = System.nanoTime();
                     assertFalse(lock.readLock().tryLock(MAX_TIMEOUT_MS, TimeUnit.MILLISECONDS));
-                    assertTrue((System.nanoTime() - startTime) >= MAX_TIMEOUT_MS);
-                } catch (InterruptedException ie) {}
+                    assertTrue((System.nanoTime() - startTime) >= TimeUnit.MILLISECONDS.toNanos(MAX_TIMEOUT_MS));
+                } catch (InterruptedException ie) {
+                    gotException = true;
+                }
+                assertFalse(gotException);
             }});
 
         startThread(t);
@@ -810,11 +843,13 @@ public class FairReentrantReadWriteLockIITest {
         Thread t = new Thread(new Runnable() {
             @Override
             public void run() {
+                boolean gotException = false;
                 try {
                     lock.readLock().lockInterruptibly();
                 } catch (InterruptedException ie) {
-
+                    gotException = true;
                 }
+                assertTrue(gotException);
             }});
 
         startAndWaitForQueuedThread(lock, t);

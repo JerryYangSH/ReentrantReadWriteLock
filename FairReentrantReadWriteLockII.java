@@ -1,7 +1,5 @@
 package com.jerry.chapter8;
 
-import org.omg.Messaging.SYNC_WITH_TRANSPORT;
-
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
@@ -10,7 +8,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * An implementation of {@link ReadWriteLock} supporting same semantics to ReentrantReadWriteLock.
@@ -48,28 +45,27 @@ public class FairReentrantReadWriteLockII implements ReadWriteLock {
         public void lock() {
             final long me = Thread.currentThread().getId();
             synchronized (lock) {
-                try {
-                    if (owners.contains(me)) {
-                        // it's locked by writer or reader in current thread
-                        reader++;
-                        readHoldCounter.set(readHoldCounter.get() + 1);
-                        return;
-                    }
-                    putQueued(me);
-                    try {
-                        while (writer || hasQueuedPredecessors(me)) {
-                            lock.wait();
-                        }
-                    } finally {
-                        removeQueued(me);
-                    }
+                if (owners.contains(me)) {
+                    // it's locked by writer or reader in current thread
                     reader++;
-
-                    owners.add(me);
                     readHoldCounter.set(readHoldCounter.get() + 1);
-                } catch (InterruptedException ie) {
-                    // TODO
+                    return;
                 }
+                putQueued(me);
+                try {
+                    while (writer || hasQueuedPredecessors(me)) {
+                        try {
+                            lock.wait();
+                        } catch (InterruptedException ie) {
+                            // eat it
+                        }
+                    }
+                } finally {
+                    removeQueued(me);
+                }
+                reader++;
+                owners.add(me);
+                readHoldCounter.set(readHoldCounter.get() + 1);
             }
         }
 
@@ -77,30 +73,26 @@ public class FairReentrantReadWriteLockII implements ReadWriteLock {
         public void lockInterruptibly() throws InterruptedException {
             final long me = Thread.currentThread().getId();
             synchronized (lock) {
-                try {
-                    if (Thread.interrupted()) {
-                        throw new InterruptedException();
-                    }
-                    if (owners.contains(me)) {
-                        // it's locked by writer or reader in current thread
-                        reader++;
-                        readHoldCounter.set(readHoldCounter.get() + 1);
-                        return;
-                    }
-                    putQueued(me);
-                    try {
-                        while (writer || hasQueuedPredecessors(me)) {
-                            lock.wait();
-                        }
-                    } finally {
-                        removeQueued(me);
-                    }
-                    reader++;
-                    owners.add(me);
-                    readHoldCounter.set(readHoldCounter.get() + 1);
-                } finally {
-                    //lock.unlock();
+                if (Thread.interrupted()) {
+                    throw new InterruptedException();
                 }
+                if (owners.contains(me)) {
+                    // reentrant, it's locked by writer or reader in current thread
+                    reader++;
+                    readHoldCounter.set(readHoldCounter.get() + 1);
+                    return;
+                }
+                putQueued(me);
+                try {
+                    while (writer || hasQueuedPredecessors(me)) {
+                        lock.wait();
+                    }
+                } finally {
+                    removeQueued(me);
+                }
+                reader++;
+                owners.add(me);
+                readHoldCounter.set(readHoldCounter.get() + 1);
             }
         }
 
@@ -109,7 +101,7 @@ public class FairReentrantReadWriteLockII implements ReadWriteLock {
             final long me = Thread.currentThread().getId();
             synchronized (lock) {
                 if (owners.contains(me)) {
-                    // it's locked by writer in current thread
+                    // reentrant, it's locked by writer or reader in current thread
                     reader++;
                     readHoldCounter.set(readHoldCounter.get() + 1);
                     return true;
@@ -148,7 +140,7 @@ public class FairReentrantReadWriteLockII implements ReadWriteLock {
             final long me = Thread.currentThread().getId();
             synchronized (lock) {
                 if (owners.contains(me)) {
-                    // it's locked by writer in current thread
+                    // reentrant, it's locked by writer or reader in current thread
                     reader++;
                     readHoldCounter.set(readHoldCounter.get() + 1);
                     return true;
@@ -210,15 +202,13 @@ public class FairReentrantReadWriteLockII implements ReadWriteLock {
                         try {
                             lock.wait();
                         } catch (InterruptedException ie) {
-                            // eat it for uninterruptable.
+                            // eat it since non-interruptable.
                         }
                     }
                 } finally {
                     removeQueued(me);
                 }
                 writer = true;
-
-                // for reentrantant
                 owners.add(me);
                 writeHoldCounter.set(writeHoldCounter.get() + 1);
             }
@@ -247,8 +237,6 @@ public class FairReentrantReadWriteLockII implements ReadWriteLock {
                     waitingQueue.poll();
                 }
                 writer = true;
-
-                // for reentrant
                 owners.add(me);
                 writeHoldCounter.set(writeHoldCounter.get() + 1);
             }
@@ -270,8 +258,6 @@ public class FairReentrantReadWriteLockII implements ReadWriteLock {
                     return false;
                 }
                 writer = true;
-
-                // for reentrant
                 owners.add(me);
                 writeHoldCounter.set(writeHoldCounter.get() + 1);
                 return true;
@@ -301,47 +287,39 @@ public class FairReentrantReadWriteLockII implements ReadWriteLock {
         public boolean tryLock(long time, TimeUnit unit) throws InterruptedException {
             final long me = Thread.currentThread().getId();
             synchronized (lock) {
-                try {
-                    if (owners.size() == 1 && owners.contains(me)) {
-                        writeHoldCounter.set(writeHoldCounter.get() + 1);
-                        writer = true;
-                        return true;
-                    }
-
-                    putQueued(me);
-                    try {
-                        final long deadlineNano = System.nanoTime() + unit.toNanos(time);
-                        while (owners.size() > 1 ||
-                                (owners.size() == 1 && !owners.contains(me)) ||
-                                hasQueuedPredecessors(me)) {
-                            long remainNano = deadlineNano - System.nanoTime();
-                            if (remainNano <= 0) {
-                                break;
-                            }
-                            lock.wait(TimeUnit.MILLISECONDS.convert(remainNano, TimeUnit.NANOSECONDS),
-                                    (int)(remainNano % 1000000));
-                        }
-                        if (owners.size() > 1 ||
-                                (owners.size() == 1 && !owners.contains(me)) ||
-                                hasQueuedPredecessors(me)) {
-                            return false;
-                        }
-                    } finally {
-                        removeQueued(me);
-                    }
-
-                    writer = true;
-
-                    // for reentrant
-                    owners.add(me);
+                if (owners.size() == 1 && owners.contains(me)) {
                     writeHoldCounter.set(writeHoldCounter.get() + 1);
-
+                    writer = true;
                     return true;
-                } catch (InterruptedException ie) {
-                    //TODO
                 }
+
+                putQueued(me);
+                try {
+                    final long deadlineNano = System.nanoTime() + unit.toNanos(time);
+                    while (owners.size() > 1 ||
+                            (owners.size() == 1 && !owners.contains(me)) ||
+                            hasQueuedPredecessors(me)) {
+                        long remainNano = deadlineNano - System.nanoTime();
+                        if (remainNano <= 0) {
+                            break;
+                        }
+                        lock.wait(TimeUnit.MILLISECONDS.convert(remainNano, TimeUnit.NANOSECONDS),
+                                (int)(remainNano % 1000000));
+                    }
+                    if (owners.size() > 1 ||
+                            (owners.size() == 1 && !owners.contains(me)) ||
+                            hasQueuedPredecessors(me)) {
+                        return false;
+                    }
+                } finally {
+                    removeQueued(me);
+                }
+                writer = true;
+                owners.add(me);
+                writeHoldCounter.set(writeHoldCounter.get() + 1);
+
+                return true;
             }
-            return false;
         }
 
         @Override
